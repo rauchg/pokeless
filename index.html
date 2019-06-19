@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta charset="UTF-8">
+    <meta property="og:title" content="Pokeless: λ plays pokemon" />
+    <meta property="og:image" content="https://pokeless.rauchg.now.sh/run.js" />
+    <meta property="og:url" content="https://pokeless.rauchg.now.sh" />
+
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html { background: yellow; }
+      div { display: flex; align-items: center; justify-content: center; flex-direction: column; height: 80vh; width: 100vw; }
+      img { width: 500px; max-width: 100vw; margin: auto; border: 8px solid #000; }
+      h1, nav { padding: 30px 10px; }
+      nav { text-align: center; }
+      h1 { font-family: helvetica; text-align: center; }
+      button { font-size: 16px; background: #000; color: #fff; margin: 1px; width: 80px; font-weight: bold; vertical-align: middle; line-height: 30px; height: 30px; border: none; }
+      button.active { background: red; }
+    </style>
+  </head>
+  <body>
+    <div>
+      <h1>Pokeless: λ plays pokemon</h1>
+      <img src="/run.js" />
+      <nav>
+        <button value="4">A</button>
+        <button value="5">B</button>
+        <button value="2">↑</button>
+        <button value="7">START</button>
+        <button value="6">SEL</button>
+        <button value="1">←</button>
+        <button value="3">↓</button>
+        <button value="0">→</button>
+      </nav>
+    </div>
+
+    <script>
+      let p = document.querySelector('div');
+      let img = document.querySelector('img');
+      let paused = false;
+      let currentKey = null;
+
+      var keyMap = {
+        37: 1,
+        39: 0,
+        65: 4,
+        83: 5,
+        66: 5,
+        38: 2,
+        40: 3,
+        79: 6,
+        13: 7
+      };
+
+      function refresh () {
+        const key = currentKey;
+        setCurrentKey(null);
+
+        fetch('/run.js', { headers: key != null ? { 'x-key': key } : {} })
+          .then(res => res.blob())
+          .then(blob => {
+            img.src = URL.createObjectURL(blob);
+            if (!paused) refresh();
+          })
+          .catch(err => {
+            console.error(err);
+          })
+      }
+
+      window.addEventListener('focus', () => {
+        if (paused) {
+          paused = false;
+          refresh();
+          console.log('focus unpause');
+        }
+      }, true);
+
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && paused) {
+          paused = false;
+          refresh();
+          console.log('visibility unpause');
+        } else if (document.hidden && !paused) {
+          paused = true;
+          console.log('visibility pause');
+        }
+      }, false);
+
+      document.addEventListener('click', ev => {
+        if (ev.target.nodeName === 'BUTTON') {
+          ev.preventDefault();
+          setCurrentKey(ev.target.value);
+        }
+      }, true);
+
+      document.addEventListener('touchstart', ev => {
+        if (paused) {
+          paused = false;
+          refresh();
+          console.log('unpause from touch');
+        }
+
+        if (ev.target.nodeName === 'BUTTON') {
+          ev.preventDefault();
+          setCurrentKey(ev.target.value);
+        }
+      }, true);
+
+      document.addEventListener('keydown', ev => {
+        const code = ev.keyCode;
+        if (keyMap[code] != null) {
+          ev.preventDefault();
+          setCurrentKey(keyMap[code]);
+        }
+      });
+
+      function setCurrentKey(key) {
+        if (currentKey != null) {
+          const activeButton = document.querySelector(`button[value="${currentKey}"]`);
+          activeButton.classList.remove('active');
+        }
+
+        if (key != null) {
+          const newButton = document.querySelector(`button[value="${key}"]`);
+          newButton.classList.add('active');
+        }
+
+        currentKey = key;
+      }
+
+      window.onload = refresh;
+    </script>
+  </body>
+</html>

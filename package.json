@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "canvas": "^2.3.1",
+    "ioredis": "^4.10.0",
+    "redis-semaphore": "^1.0.7",
+    "then-sleep": "^1.0.1"
+  }
+}
