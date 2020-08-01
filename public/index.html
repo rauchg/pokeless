@@ -22,7 +22,7 @@
   <body>
     <div>
       <h1>Pokeless: λ plays pokemon</h1>
-      <img src="/run.js" />
+      <img src="/api/run" />
       <nav>
         <button value="4">A</button>
         <button value="5">B</button>
@@ -57,7 +57,7 @@
         const key = currentKey;
         setCurrentKey(null);
 
-        fetch('/run.js', { headers: key != null ? { 'x-key': key } : {} })
+        fetch('/api/run', { headers: key != null ? { 'x-key': key } : {} })
           .then(res => res.blob())
           .then(blob => {
             img.src = URL.createObjectURL(blob);

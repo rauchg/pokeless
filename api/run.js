@@ -1,7 +1,7 @@
 const fs = require("fs");
-const GameBoy = require("./gameboy");
+const GameBoy = require("../lib/gameboy");
 const { createCanvas } = require("canvas");
-const rom = fs.readFileSync(__dirname + "/yellow.gb");
+const rom = fs.readFileSync(__dirname + "/../lib/yellow.gb");
 const { createHash } = require("crypto");
 const Redis = require("ioredis");
 const { promisify } = require("util");
