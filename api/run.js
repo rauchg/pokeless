@@ -31,6 +31,7 @@ module.exports = async (req, res) => {
     try {
       await run();
     } catch (err) {
+      console.error(err.stack);
       await read();
     }
   } else {
@@ -40,6 +41,7 @@ module.exports = async (req, res) => {
   await r.disconnect();
 
   async function run() {
+    console.log('running');
     const mutex = new Mutex(r, "run", {
       lockTimeout: 5000,
       acquireTimeout: 50
@@ -134,14 +136,14 @@ module.exports = async (req, res) => {
       const buf = await toBuffer();
       console.timeEnd("render");
 
-      console.time("snapshot");
+      console.time("snap");
       await r.mset({
         latest_etag: etag,
         latest_image: buf,
         latest_state: state,
         key: -1
       });
-      console.timeEnd("snapshot");
+      console.timeEnd("snap");
 
       if (e3 !== null || e4 !== null) {
         throw new Error(`Database write error ${e1} ${e2}`);

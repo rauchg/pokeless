@@ -1,8 +1,8 @@
 {
   "dependencies": {
     "canvas": "^2.6.1",
-    "ioredis": "^4.10.0",
-    "redis-semaphore": "^1.0.7",
+    "ioredis": "^4.17.3",
+    "redis-semaphore": "^2.1.1",
     "then-sleep": "^1.0.1"
   },
   "scripts": {
