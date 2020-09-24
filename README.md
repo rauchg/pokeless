@@ -1,6 +1,6 @@
 # Pokeless
 
-https://pokeless.rauchg.now.sh
+https://pokeless.vercel.app
 
 ## Development
 
