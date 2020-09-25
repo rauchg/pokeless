@@ -145,10 +145,6 @@ module.exports = async (req, res) => {
       });
       console.timeEnd("snap");
 
-      if (e3 !== null || e4 !== null) {
-        throw new Error(`Database write error ${e1} ${e2}`);
-      }
-
       res.writeHead(200, {
         "Content-Type": "image/png",
         etag
