@@ -1,6 +1,0 @@
-{
-  "regions": ["sfo"],
-  "env": {
-    "REDIS_URL": "@prisma-day-redis"
-  }
-}
