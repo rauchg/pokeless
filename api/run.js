@@ -33,8 +33,6 @@ module.exports = async (req, res) => {
   let latestEtag = await redis.get("latest_etag");
   console.log("latestEtag", latestEtag);
 
-  let latestState = null;
-
   if (!latestEtag || latestEtag === req.headers["if-none-match"]) {
     try {
       await run();
