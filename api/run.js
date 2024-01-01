@@ -1,16 +1,22 @@
-const fs = require("fs");
-const GameBoy = require("../lib/gameboy");
-const { createCanvas } = require("canvas");
+import fs from "fs";
+import GameBoy from "../lib/gameboy";
+import { createCanvas } from "@napi-rs/canvas";
+import { createHash } from "crypto";
+import { Lock } from "@upstash/lock";
+import { Redis } from "@upstash/redis";
+import { compress, uncompress } from "lz4-napi";
+import * as blob from "@vercel/blob";
 const rom = fs.readFileSync(__dirname + "/../lib/yellow.gb");
-const { createHash } = require("crypto");
-const Redis = require("ioredis");
-const { promisify } = require("util");
-const zlib = require("zlib");
-const sleep = require("then-sleep");
-const Mutex = require("redis-semaphore").Mutex;
 
 // how many frames to emulate each invocation
 const FRAMES = 50;
+
+const redis = Redis.fromEnv();
+const lock = new Lock({
+  id: "run",
+  lease: 5000,
+  redis: Redis.fromEnv(),
+});
 
 module.exports = async (req, res) => {
   let key = req.headers["x-key"];
@@ -23,8 +29,10 @@ module.exports = async (req, res) => {
     }
   }
 
-  const r = new Redis(process.env.REDIS_URL);
-  let latestEtag = await r.get("latest_etag");
+  console.log("connected to redis");
+  let latestEtag = await redis.get("latest_etag");
+  console.log("latestEtag", latestEtag);
+
   let latestState = null;
 
   if (!latestEtag || latestEtag === req.headers["if-none-match"]) {
@@ -38,51 +46,51 @@ module.exports = async (req, res) => {
     await read();
   }
 
-  await r.disconnect();
-
   async function run() {
-    console.log('running');
-    const mutex = new Mutex(r, "run", {
-      lockTimeout: 5000,
-      acquireTimeout: 50
-    });
+    console.log("running");
 
     // we make the key be "last one wins", if any,
     // so that everyone gets a chance at deciding
     // the next command
     if (key != null) {
       console.time("save key");
-      await r.set("key", key);
+      await redis.set("key", key);
       console.timeEnd("save key");
     }
 
     console.time("mutex acquire");
-    await mutex.acquire();
+    const acquired = await lock.acquire();
     console.timeEnd("mutex acquire");
+
+    if (!acquired) {
+      throw new Error("Could not acquire lock");
+    }
 
     try {
       console.time("gb init");
       const canvas = createCanvas(160 * 2, 144 * 2);
-      const toBuffer = promisify(canvas.toBuffer.bind(canvas));
       const gb = new GameBoy(canvas, rom);
       console.timeEnd("gb init");
 
       if (latestEtag) {
-        console.time("read state");
-        [[e1, latestEtag], [e2, latestState]] = await r
+        console.time("read etag");
+        let stateUrl;
+        [latestEtag, stateUrl] = await redis
           .multi()
           .get("latest_etag")
-          .getBuffer("latest_state")
+          .get("state_url")
           .exec();
-        console.timeEnd("read state");
+        console.timeEnd("read etag");
 
-        if (e1 !== null || e2 !== null) {
-          throw new Error(`Database read error ${e1} ${e2}`);
-        }
+        console.time("read state");
+        latestState = await (await fetch(stateUrl)).arrayBuffer();
+        console.timeEnd("read state");
 
         if (latestState) {
           console.time("init state");
-          gb.returnFromState(JSON.parse(latestState));
+          gb.returnFromState(
+            JSON.parse(await uncompress(Buffer.from(latestState)))
+          );
           console.timeEnd("init state");
         } else {
           console.time("gb start");
@@ -99,7 +107,7 @@ module.exports = async (req, res) => {
 
       // press and release a key
       console.time("fetch key");
-      let key = await r.get("key");
+      let key = await redis.get("key");
       console.timeEnd("fetch key");
       if (key != null) {
         key = Number(key);
@@ -122,52 +130,69 @@ module.exports = async (req, res) => {
       }
       console.timeEnd("emulate");
 
+      console.time("save state");
+      const savedState = gb.saveState();
+      console.timeEnd("save state");
+
       console.time("serialize state");
-      const state = JSON.stringify(gb.saveState());
+      const state = JSON.stringify(savedState);
       console.timeEnd("serialize state");
 
+      // compress
+      console.time("compress state");
+      const compressedState = await compress(state);
+      console.timeEnd("compress state");
+
       console.time("hash state");
-      const etag = createHash("sha256")
-        .update(state)
-        .digest("hex");
+      const etag = createHash("sha256").update(state).digest("hex");
       console.timeEnd("hash state");
 
       console.time("render");
-      const buf = await toBuffer();
+      const buf = canvas.toBuffer("image/png");
       console.timeEnd("render");
 
-      console.time("snap");
-      await r.mset({
-        latest_etag: etag,
-        latest_image: buf,
-        latest_state: state,
-        key: -1
+      console.time("snap state");
+      const { url } = await blob.put(`/state/${etag}`, compressedState, {
+        access: "public",
       });
-      console.timeEnd("snap");
+      console.timeEnd("snap state");
+
+      console.time("snap meta");
+      await redis
+        .multi()
+        .set("latest_etag", etag)
+        .set("latest_image", buf)
+        .set("state_url", url)
+        .set("key", -1)
+        .exec();
+      console.timeEnd("snap meta");
 
       res.writeHead(200, {
         "Content-Type": "image/png",
-        etag
+        etag,
       });
       res.end(buf);
     } finally {
-      await mutex.release();
+      await lock.release();
     }
   }
 
   async function read() {
     console.log("reading");
-    const [[e1, etag], [e2, image]] = await r
+
+    console.time("read image");
+    const [etag, image] = await redis
       .multi()
       .get("latest_etag")
-      .getBuffer("latest_image")
+      .get("latest_image")
       .exec();
+    console.timeEnd("read image");
 
-    if (e1 || e2) {
-      throw new Error(`Database read error ${e1} ${e2}`);
-    }
+    console.time("hydrate buffer");
+    const buffer = Buffer.from(image.data);
+    console.timeEnd("hydrate buffer");
 
     res.writeHead(200, { "Content-Type": "image/png", etag });
-    res.end(image);
+    res.end(buffer);
   }
 };

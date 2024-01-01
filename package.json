@@ -1,14 +1,9 @@
 {
   "dependencies": {
-    "canvas": "^2.6.1",
-    "ioredis": "^4.17.3",
-    "redis-semaphore": "^2.1.1",
-    "then-sleep": "^1.0.1"
-  },
-  "scripts": {
-    "vercel-build": "yum install libuuid-devel libmount-devel && cp /lib64/{libuuid,libmount,libblkid}.so.1 node_modules/canvas/build/Release/"
-  },
-  "resolutions": {
-    "**/needle": "^2.5.2"
+    "@napi-rs/canvas": "^0.1.44",
+    "@upstash/lock": "^0.1.0",
+    "@upstash/redis": "^1.27.1",
+    "@vercel/blob": "^0.16.1",
+    "lz4-napi": "^2.2.0"
   }
 }
