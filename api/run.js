@@ -29,20 +29,21 @@ module.exports = async (req, res) => {
     }
   }
 
-  console.log("connected to redis");
   let latestEtag = await redis.get("latest_etag");
-  console.log("latestEtag", latestEtag);
+  console.log("latest etag", latestEtag);
 
-  if (!latestEtag || latestEtag === req.headers["if-none-match"]) {
-    try {
-      await run();
-    } catch (err) {
-      console.error(err.stack);
-      await read();
-    }
-  } else {
+  // if (!latestEtag || latestEtag === req.headers["if-none-match"]) {
+  try {
+    console.log("trying to run");
+    await run();
+  } catch (err) {
+    console.error(err.stack);
     await read();
   }
+  // } else {
+  //   console.log("not reading");
+  //   await read();
+  // }
 
   async function run() {
     console.log("running");
@@ -80,11 +81,11 @@ module.exports = async (req, res) => {
           .exec();
         console.timeEnd("read etag");
 
-        console.time("read state");
-        latestState = await (await fetch(stateUrl)).arrayBuffer();
-        console.timeEnd("read state");
+        if (stateUrl) {
+          console.time("read state");
+          let latestState = await (await fetch(stateUrl)).arrayBuffer();
+          console.timeEnd("read state");
 
-        if (latestState) {
           console.time("init state");
           gb.returnFromState(
             JSON.parse(await uncompress(Buffer.from(latestState)))
