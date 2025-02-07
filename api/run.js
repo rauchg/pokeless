@@ -69,15 +69,24 @@ module.exports = async (req, res) => {
 
       if (latestEtag) {
         console.time("read state");
-        [[e1, latestEtag], [e2, latestState]] = await r
+        const results = await r
           .multi()
           .get("latest_etag")
           .getBuffer("latest_state")
           .exec();
         console.timeEnd("read state");
 
-        if (e1 !== null || e2 !== null) {
-          throw new Error(`Database read error ${e1} ${e2}`);
+        if (!results) {
+          throw new Error("Redis transaction failed");
+        }
+
+        const [[err1, etag], [err2, state]] = results;
+        if (err1 || err2) {
+          throw new Error(`Database read error: ${err1 || err2}`);
+        }
+        
+        latestEtag = etag;
+        latestState = state;
         }
 
         if (latestState) {
@@ -157,14 +166,19 @@ module.exports = async (req, res) => {
 
   async function read() {
     console.log("reading");
-    const [[e1, etag], [e2, image]] = await r
+    const results = await r
       .multi()
       .get("latest_etag")
       .getBuffer("latest_image")
       .exec();
 
-    if (e1 || e2) {
-      throw new Error(`Database read error ${e1} ${e2}`);
+    if (!results) {
+      throw new Error("Redis transaction failed");
+    }
+
+    const [[err1, etag], [err2, image]] = results;
+    if (err1 || err2) {
+      throw new Error(`Database read error: ${err1 || err2}`);
     }
 
     res.writeHead(200, { "Content-Type": "image/png", etag });

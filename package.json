@@ -1,14 +1,11 @@
 {
   "dependencies": {
-    "canvas": "^2.6.1",
-    "ioredis": "^4.17.3",
-    "redis-semaphore": "^2.1.1",
+    "canvas": "^3.1.0",
+    "ioredis": "^5.4.2",
+    "redis-semaphore": "^5.6.1",
     "then-sleep": "^1.0.1"
   },
   "scripts": {
     "vercel-build": "yum install libuuid-devel libmount-devel && cp /lib64/{libuuid,libmount,libblkid}.so.1 node_modules/canvas/build/Release/"
-  },
-  "resolutions": {
-    "**/needle": "^2.5.2"
   }
 }
