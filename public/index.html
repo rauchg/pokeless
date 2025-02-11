@@ -35,100 +35,129 @@
     </div>
 
     <script>
-      let p = document.querySelector('div');
-      let img = document.querySelector('img');
+      const img = document.querySelector('img');
       let paused = false;
-      let currentKey = null;
 
-      var keyMap = {
-        37: 1,
-        39: 0,
-        65: 4,
-        83: 5,
-        66: 5,
-        38: 2,
-        40: 3,
-        79: 6,
-        13: 7
+      // Key mapping
+      const keyMap = {
+        'ArrowRight': 0,
+        'ArrowLeft': 1,
+        'ArrowUp': 2,
+        'ArrowDown': 3,
+        'a': 4,
+        'b': 5,
+        'Enter': 6,
+        ' ': 7
       };
 
-      function refresh () {
-        const key = currentKey;
-        setCurrentKey(null);
-
-        fetch('/api/run', { headers: key != null ? { 'x-key': key } : {} })
-          .then(res => res.blob())
-          .then(blob => {
-            img.src = URL.createObjectURL(blob);
-            if (!paused) refresh();
-          })
-          .catch(err => {
-            console.error(err);
-          })
+      // Handle key press
+      function pressKey(key) {
+        setActiveButton(key);
+        fetch('/api/key', {
+          method: 'POST',
+          body: key.toString()
+        }).catch(err => {
+          console.error('Error pressing key:', err);
+        });
       }
 
-      window.addEventListener('focus', () => {
-        if (paused) {
-          paused = false;
+      // Handle key release
+      function releaseKey() {
+        setActiveButton(null);
+      }
+
+      // Update active button UI
+      function setActiveButton(key) {
+        // Remove active class from all buttons
+        document.querySelectorAll('button.active').forEach(btn => {
+          btn.classList.remove('active');
+        });
+
+        // Add active class to pressed button
+        if (key !== null) {
+          const btn = document.querySelector(`button[value="${key}"]`);
+          if (btn) btn.classList.add('active');
+        }
+      }
+
+      // Sequential frame updates
+      async function refresh() {
+        if (paused) return;
+        
+        try {
+          const res = await fetch('/api/run');
+          const blob = await res.blob();
+          img.src = URL.createObjectURL(blob);
+          // Queue next frame only after this one loads
           refresh();
-          console.log('focus unpause');
+        } catch (err) {
+          console.error('Error fetching frame:', err);
+          // On error, wait a bit before retrying
+          setTimeout(refresh, 1000);
         }
-      }, true);
+      }
 
-      document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && paused) {
-          paused = false;
-          refresh();
-          console.log('visibility unpause');
-        } else if (document.hidden && !paused) {
-          paused = true;
-          console.log('visibility pause');
-        }
-      }, false);
-
-      document.addEventListener('click', ev => {
-        if (ev.target.nodeName === 'BUTTON') {
-          ev.preventDefault();
-          setCurrentKey(ev.target.value);
-        }
-      }, true);
-
-      document.addEventListener('touchstart', ev => {
-        if (paused) {
-          paused = false;
-          refresh();
-          console.log('unpause from touch');
-        }
-
-        if (ev.target.nodeName === 'BUTTON') {
-          ev.preventDefault();
-          setCurrentKey(ev.target.value);
-        }
-      }, true);
-
-      document.addEventListener('keydown', ev => {
-        const code = ev.keyCode;
-        if (keyMap[code] != null) {
-          ev.preventDefault();
-          setCurrentKey(keyMap[code]);
+      // Key event handlers
+      window.addEventListener('keydown', (e) => {
+        if (e.repeat) return;
+        const key = keyMap[e.key.toLowerCase()];
+        if (key !== undefined) {
+          e.preventDefault();
+          pressKey(key);
         }
       });
 
-      function setCurrentKey(key) {
-        if (currentKey != null) {
-          const activeButton = document.querySelector(`button[value="${currentKey}"]`);
-          activeButton.classList.remove('active');
+      window.addEventListener('keyup', (e) => {
+        const key = keyMap[e.key.toLowerCase()];
+        if (key !== undefined) {
+          e.preventDefault();
+          releaseKey();
         }
+      });
 
-        if (key != null) {
-          const newButton = document.querySelector(`button[value="${key}"]`);
-          newButton.classList.add('active');
+      // Button event handlers
+      document.addEventListener('mousedown', (e) => {
+        if (e.target.nodeName === 'BUTTON') {
+          e.preventDefault();
+          pressKey(e.target.value);
         }
+      });
 
-        currentKey = key;
-      }
+      document.addEventListener('mouseup', (e) => {
+        if (e.target.nodeName === 'BUTTON') {
+          e.preventDefault();
+          releaseKey();
+        }
+      });
 
-      window.onload = refresh;
+      // Touch event handlers
+      document.addEventListener('touchstart', (e) => {
+        if (e.target.nodeName === 'BUTTON') {
+          e.preventDefault();
+          pressKey(e.target.value);
+        }
+      });
+
+      document.addEventListener('touchend', (e) => {
+        if (e.target.nodeName === 'BUTTON') {
+          e.preventDefault();
+          releaseKey();
+        }
+      });
+
+      // Visibility handling
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          paused = true;
+          releaseKey();
+        } else {
+          paused = false;
+          refresh();
+        }
+      });
+
+      // Start the stream
+      refresh();
     </script>
   </body>
 </html>

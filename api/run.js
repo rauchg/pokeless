@@ -1,103 +1,117 @@
 const fs = require("fs");
 const GameBoy = require("../lib/gameboy");
-const { createCanvas } = require("canvas");
+const { createCanvas } = require("@napi-rs/canvas");
 const rom = fs.readFileSync(__dirname + "/../lib/yellow.gb");
-const { createHash } = require("crypto");
 const Redis = require("ioredis");
-const { promisify } = require("util");
-const zlib = require("zlib");
-const sleep = require("then-sleep");
 const Mutex = require("redis-semaphore").Mutex;
+const { waitUntil } = require("@vercel/functions");
 
 // how many frames to emulate each invocation
 const FRAMES = 50;
 
-module.exports = async (req, res) => {
-  let key = req.headers["x-key"];
-  if (key != null) {
-    key = Number(key);
-    if (key >= 0 && key < 8) {
-      // valid key
-    } else {
-      key = null;
-    }
+const r = new Redis(process.env.REDIS_URL);
+const sub = new Redis(process.env.REDIS_URL);
+
+// Global flag to ensure only one game loop runs
+let gameLoopStarted = false;
+
+// In-memory cache of the latest frame
+let latestFrame = null;
+
+export async function GET(req) {
+  // Try to become the game runner if no one else has
+  if (!gameLoopStarted) {
+    gameLoopStarted = true;
+    waitUntil(
+      (async () => {
+        const mutex = new Mutex(r, "run");
+
+        const acquired = await mutex.tryAcquire();
+        if (acquired) {
+          console.log("acquired lock, running game loop");
+          try {
+            await run(mutex);
+          } catch (err) {
+            console.error("error running game loop:", err.stack);
+          } finally {
+            await mutex.release();
+            // Reset the flag when we're done running the game loop
+            gameLoopStarted = false;
+          }
+        }
+      })(),
+    );
   }
 
-  const r = new Redis(process.env.REDIS_URL);
-  let latestEtag = await r.get("latest_etag");
-  let latestState = null;
+  // Everyone gets frames through subscription
+  return new Promise((resolve) => {
+    const id = Math.random().toString(36).slice(2);
+    console.log(`[${id}] subscribe starting`);
+    sub.subscribe("frame");
+    sub.on("message", async (channel, message) => {
+      console.log(`[${id}] got signal, fetching frame`);
+      sub.unsubscribe();
 
-  if (!latestEtag || latestEtag === req.headers["if-none-match"]) {
-    try {
-      await run();
-    } catch (err) {
-      console.error(err.stack);
-      await read();
-    }
-  } else {
-    await read();
-  }
+      // First check if we have the frame in memory (same process optimization)
+      if (latestFrame) {
+        console.log(`[${id}] using in-memory frame`);
+        resolve(
+          new Response(latestFrame, {
+            status: 200,
+            headers: {
+              "Content-Type": "image/png",
+            },
+          }),
+        );
+        return;
+      }
 
-  await r.disconnect();
+      // Otherwise fetch from Redis
+      console.log(`[${id}] fetching frame from Redis`);
+      const image = await r.getBuffer("latest_image");
+      if (!image) {
+        throw new Error("No image found in database");
+      }
 
-  async function run() {
-    console.log('running');
-    const mutex = new Mutex(r, "run", {
-      lockTimeout: 5000,
-      acquireTimeout: 50
+      resolve(
+        new Response(image, {
+          status: 200,
+          headers: {
+            "Content-Type": "image/png",
+          },
+        }),
+      );
     });
+  });
 
-    // we make the key be "last one wins", if any,
-    // so that everyone gets a chance at deciding
-    // the next command
-    if (key != null) {
-      console.time("save key");
-      await r.set("key", key);
-      console.timeEnd("save key");
-    }
-
-    console.time("mutex acquire");
-    await mutex.acquire();
-    console.timeEnd("mutex acquire");
+  async function run(mutex) {
+    console.log("running");
 
     try {
+      // Get the latest key press
+      const lastKeyStr = await r.get("last_key");
+      let key = null;
+
+      if (lastKeyStr) {
+        key = Number(lastKeyStr);
+        console.log("using key press:", key);
+      }
+
+      // Clear the last key so it's not used again
+      await r.del("last_key");
       console.time("gb init");
       const canvas = createCanvas(160 * 2, 144 * 2);
-      const toBuffer = promisify(canvas.toBuffer.bind(canvas));
       const gb = new GameBoy(canvas, rom);
       console.timeEnd("gb init");
 
-      if (latestEtag) {
-        console.time("read state");
-        const results = await r
-          .multi()
-          .get("latest_etag")
-          .getBuffer("latest_state")
-          .exec();
-        console.timeEnd("read state");
+      console.time("read state");
+      const state = await r.get("latest_state");
+      console.timeEnd("read state");
 
-        if (!results) {
-          throw new Error("Redis transaction failed");
-        }
-
-        const [[err1, etag], [err2, state]] = results;
-        if (err1 || err2) {
-          throw new Error(`Database read error: ${err1 || err2}`);
-        }
-        
-        latestEtag = etag;
-        latestState = state;
-        }
-
-        if (latestState) {
-          console.time("init state");
-          gb.returnFromState(JSON.parse(latestState));
-          console.timeEnd("init state");
-        } else {
-          console.time("gb start");
-          gb.start();
-          console.timeEnd("gb start");
-        }
+      if (state) {
+        console.time("init state");
+        gb.returnFromState(JSON.parse(state));
+        console.timeEnd("init state");
       } else {
         console.time("gb start");
         gb.start();
@@ -106,13 +120,7 @@ module.exports = async (req, res) => {
 
       gb.stopEmulator = 1;
 
-      // press and release a key
-      console.time("fetch key");
-      let key = await r.get("key");
-      console.timeEnd("fetch key");
-      if (key != null) {
-        key = Number(key);
-      }
+      // key was already fetched at the start
 
       if (key != null) {
         console.log("executing key", key);
@@ -132,56 +140,47 @@ module.exports = async (req, res) => {
       console.timeEnd("emulate");
 
       console.time("serialize state");
-      const state = JSON.stringify(gb.saveState());
+      const state2 = JSON.stringify(gb.saveState());
       console.timeEnd("serialize state");
 
-      console.time("hash state");
-      const etag = createHash("sha256")
-        .update(state)
-        .digest("hex");
-      console.timeEnd("hash state");
-
       console.time("render");
-      const buf = await toBuffer();
+      const buf = canvas.toBuffer("image/png");
       console.timeEnd("render");
 
       console.time("snap");
+      // Store in Redis and update memory cache
+      latestFrame = buf;
       await r.mset({
-        latest_etag: etag,
         latest_image: buf,
-        latest_state: state,
-        key: -1
+        latest_state: state2,
+        key: -1,
       });
       console.timeEnd("snap");
 
-      res.writeHead(200, {
-        "Content-Type": "image/png",
-        etag
-      });
-      res.end(buf);
+      // Notify subscribers that a new frame is ready
+      await r.publish("frame", "new");
     } finally {
-      await mutex.release();
+      try {
+        await mutex.release();
+      } catch (err) {
+        console.error("error releasing lock", err.stack);
+      }
     }
   }
 
   async function read() {
     console.log("reading");
-    const results = await r
-      .multi()
-      .get("latest_etag")
-      .getBuffer("latest_image")
-      .exec();
+    const image = await r.getBuffer("latest_image");
 
-    if (!results) {
-      throw new Error("Redis transaction failed");
+    if (!image) {
+      throw new Error("No image found in database");
     }
 
-    const [[err1, etag], [err2, image]] = results;
-    if (err1 || err2) {
-      throw new Error(`Database read error: ${err1 || err2}`);
-    }
-
-    res.writeHead(200, { "Content-Type": "image/png", etag });
-    res.end(image);
+    return new Response(image, {
+      status: 200,
+      headers: {
+        "Content-Type": "image/png",
+      },
+    });
   }
-};
+}
