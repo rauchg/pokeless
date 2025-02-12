@@ -11,16 +11,20 @@ export async function POST(req) {
   }
 
   try {
-    // Set the key
-    await r.set("last_key", key.toString());
+    const geo = {
+      city: req.headers.get("x-vercel-ip-city"),
+      region: req.headers.get("x-vercel-ip-region"),
+      country: req.headers.get("x-vercel-ip-country")
+    };
 
-    // Keep connection open until client disconnects
-    await new Promise(() => {});
+    // Set the key with location info
+    await r.mset({
+      "last_key": key.toString(),
+      "last_key_geo": JSON.stringify(geo)
+    });
+    return new Response("OK", { status: 200 });
   } catch (err) {
     console.error("error with key submission:", err.stack);
     return new Response("Internal error", { status: 500 });
-  } finally {
-    // Clear the key when client disconnects
-    await r.del("last_key");
   }
 }

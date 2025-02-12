@@ -1,106 +1,244 @@
 <!doctype html>
 <html>
-  <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta charset="UTF-8">
-    <meta property="og:title" content="Pokeless: λ plays pokemon" />
-    <meta property="og:image" content="https://pokeless.rauchg.now.sh/run.js" />
-    <meta property="og:url" content="https://pokeless.rauchg.now.sh" />
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      html { background: yellow; }
-      div { display: flex; align-items: center; justify-content: center; flex-direction: column; height: 80vh; width: 100vw; }
-      img { width: 500px; max-width: 100vw; margin: auto; border: 8px solid #000; }
-      h1, nav { padding: 30px 10px; }
-      nav { text-align: center; }
-      h1 { font-family: helvetica; text-align: center; }
-      button { font-size: 16px; background: #000; color: #fff; margin: 1px; width: 80px; font-weight: bold; vertical-align: middle; line-height: 30px; height: 30px; border: none; }
-      button.active { background: red; }
-    </style>
-  </head>
-  <body>
-    <div>
-      <h1>Pokeless: λ plays pokemon</h1>
-      <img src="/api/run" />
-      <nav>
-        <button value="4">A</button>
-        <button value="5">B</button>
-        <button value="2">↑</button>
-        <button value="7">START</button>
-        <button value="6">SEL</button>
-        <button value="1">←</button>
-        <button value="3">↓</button>
-        <button value="0">→</button>
-      </nav>
-    </div>
 
-    <script>
-      const img = document.querySelector('img');
-      let paused = false;
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8" />
+  <meta property="og:title" content="Pokeless: λ plays pokemon" />
+  <meta property="og:image" content="https://pokeless.rauchg.now.sh/run.js" />
+  <meta property="og:url" content="https://pokeless.rauchg.now.sh" />
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-      // Key mapping
-      const keyMap = {
-        'ArrowRight': 0,
-        'ArrowLeft': 1,
-        'ArrowUp': 2,
-        'ArrowDown': 3,
-        'a': 4,
-        'b': 5,
-        'Enter': 6,
-        ' ': 7
-      };
+    html {
+      background: yellow;
+    }
 
-      // Handle key press
-      function pressKey(key) {
-        setActiveButton(key);
-        fetch('/api/key', {
-          method: 'POST',
-          body: key.toString()
-        }).catch(err => {
-          console.error('Error pressing key:', err);
-        });
+    div {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      height: 80vh;
+      width: 100vw;
+    }
+
+    canvas {
+      width: 500px;
+      max-width: 100vw;
+      margin: auto;
+      border: 8px solid #000;
+      transition: opacity 0.3s ease-in-out;
+    }
+
+    canvas.reconnecting {
+      opacity: 0.5;
+    }
+
+    h1,
+    nav {
+      padding: 30px 10px;
+    }
+
+
+    nav {
+      text-align: center;
+    }
+
+    h1 {
+      font-family: helvetica;
+      text-align: center;
+    }
+
+    button {
+      font-size: 16px;
+      background: #000;
+      color: #fff;
+      margin: 1px;
+      width: 80px;
+      font-weight: bold;
+      vertical-align: middle;
+      line-height: 30px;
+      height: 30px;
+      border: none;
+    }
+
+    button.active {
+      background: red;
+    }
+  </style>
+</head>
+
+<body>
+  <div>
+    <h1>Pokeless: λ plays pokemon</h1>
+    <canvas width="320" height="288"></canvas>
+    <nav>
+      <button value="4">A</button>
+      <button value="5">B</button>
+      <button value="2">↑</button>
+      <button value="7">START</button>
+      <button value="6">SEL</button>
+      <button value="1">←</button>
+      <button value="3">↓</button>
+      <button value="0">→</button>
+    </nav>
+  </div>
+
+  <script>
+    const canvas = document.querySelector('canvas');
+    const ctx = canvas.getContext('2d');
+    let paused = false;
+    let lastFrameTime = Date.now();
+
+    // Key mapping
+    const keyMap = {
+      'ArrowRight': '0',
+      'ArrowLeft': '1',
+      'ArrowUp': '2',
+      'ArrowDown': '3',
+      'a': '4',
+      'b': '5',
+      'Enter': '6',
+      ' ': '7',
+      'Right': '0',  // IE/Edge compatibility
+      'Left': '1',   // IE/Edge compatibility
+      'Up': '2',     // IE/Edge compatibility
+      'Down': '3'    // IE/Edge compatibility
+    };
+
+    // Handle key press
+    function pressKey(key) {
+      setActiveButton(key);
+      fetch('/api/key', {
+        method: 'POST',
+        body: key
+      }).catch(err => {
+        console.error('Error pressing key:', err);
+      });
+    }
+
+    // Handle key release
+    function releaseKey() {
+      setActiveButton(null);
+    }
+
+    // Update active button UI
+    function setActiveButton(key) {
+      // Remove active class from all buttons
+      document.querySelectorAll('button.active').forEach(btn => {
+        btn.classList.remove('active');
+      });
+
+      // Add active class to pressed button
+      if (key !== null) {
+        const btn = document.querySelector(`button[value="${key}"]`);
+        if (btn) btn.classList.add('active');
+      }
+    }
+
+    // Stream frames
+    let retryCount = 0;
+    const MAX_RETRY_DELAY = 5000; // max 5 second delay
+
+    async function startStream() {
+      if (paused) return;
+
+      // Add reconnecting class before starting new stream
+      if (Date.now() - lastFrameTime > 1000) {
+        canvas.classList.add('reconnecting');
       }
 
-      // Handle key release
-      function releaseKey() {
-        setActiveButton(null);
-      }
+      try {
+        const response = await fetch('/api/run');
+        const reader = response.body.getReader();
+        let buffer = new Uint8Array();
 
-      // Update active button UI
-      function setActiveButton(key) {
-        // Remove active class from all buttons
-        document.querySelectorAll('button.active').forEach(btn => {
-          btn.classList.remove('active');
-        });
+        // Reset retry count and fade state on successful connection
+        retryCount = 0;
+        canvas.classList.remove('reconnecting');
 
-        // Add active class to pressed button
-        if (key !== null) {
-          const btn = document.querySelector(`button[value="${key}"]`);
-          if (btn) btn.classList.add('active');
-        }
-      }
+        while (true) {
+          const {value, done} = await reader.read();
+          if (done) break;
 
-      // Sequential frame updates
-      async function refresh() {
-        if (paused) return;
-        
-        try {
-          const res = await fetch('/api/run');
-          const blob = await res.blob();
-          img.src = URL.createObjectURL(blob);
-          // Queue next frame only after this one loads
-          refresh();
+          // Append new data to buffer
+          const newBuffer = new Uint8Array(buffer.length + value.length);
+          newBuffer.set(buffer);
+          newBuffer.set(value, buffer.length);
+          buffer = newBuffer;
+
+          // Look for frame boundaries
+          let frameStart = 0;
+          while (true) {
+            // Find start of PNG data
+            const pngStart = findSequence(buffer, [0x89, 0x50, 0x4E, 0x47], frameStart);
+            if (pngStart === -1) break;
+
+            // Find end of PNG data (IEND chunk)
+            const pngEnd = findSequence(buffer, [0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82], pngStart);
+            if (pngEnd === -1) break;
+
+            // Extract PNG data
+            const pngData = buffer.slice(pngStart, pngEnd + 8);
+            
+            // Create and display image
+            const blob = new Blob([pngData], { type: 'image/png' });
+            const img = new Image();
+            img.onload = () => {
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              URL.revokeObjectURL(img.src);
+              lastFrameTime = Date.now();
+              canvas.classList.remove('reconnecting');
+            };
+            img.src = URL.createObjectURL(blob);
+
+            // Move to next frame
+            frameStart = pngEnd + 8;
+
+              // Move to next frame
+              frameStart = pngEnd + 8;
+            }
+
+            // Keep only unprocessed data
+            buffer = buffer.slice(frameStart);
+          }
+
+          // Stream completed normally, start a new one immediately
+          startStream();
         } catch (err) {
-          console.error('Error fetching frame:', err);
-          // On error, wait a bit before retrying
-          setTimeout(refresh, 1000);
+          console.error('Error streaming frames:', err);
+          // Exponential backoff with jitter
+          const delay = Math.min(Math.pow(2, retryCount) * 1000 + Math.random() * 1000, MAX_RETRY_DELAY);
+          retryCount++;
+          setTimeout(startStream, delay);
         }
+      }
+
+
+      // Helper function to find byte sequence in buffer
+      function findSequence(buffer, sequence, start = 0) {
+        for (let i = start; i <= buffer.length - sequence.length; i++) {
+          let found = true;
+          for (let j = 0; j < sequence.length; j++) {
+            if (buffer[i + j] !== sequence[j]) {
+              found = false;
+              break;
+            }
+          }
+          if (found) return i;
+        }
+        return -1;
       }
 
       // Key event handlers
       window.addEventListener('keydown', (e) => {
         if (e.repeat) return;
-        const key = keyMap[e.key.toLowerCase()];
+        const key = keyMap[e.key];
         if (key !== undefined) {
           e.preventDefault();
           pressKey(key);
@@ -108,7 +246,7 @@
       });
 
       window.addEventListener('keyup', (e) => {
-        const key = keyMap[e.key.toLowerCase()];
+        const key = keyMap[e.key];
         if (key !== undefined) {
           e.preventDefault();
           releaseKey();
@@ -152,12 +290,13 @@
           releaseKey();
         } else {
           paused = false;
-          refresh();
+          startStream();
         }
       });
 
       // Start the stream
-      refresh();
-    </script>
-  </body>
+      startStream();
+  </script>
+</body>
+
 </html>
