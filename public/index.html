@@ -2,23 +2,29 @@
 <html>
 
 <head>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700" rel="stylesheet" />
+
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta charset="UTF-8" />
-  <meta property="og:title" content="Pokeless: λ plays pokemon" />
-  <meta property="og:image" content="https://pokeless.rauchg.now.sh/run.js" />
-  <meta property="og:url" content="https://pokeless.rauchg.now.sh" />
+  <meta property="og:title" content="Fluid plays Pokémon" />
+  <meta property="og:url" content="https://fpp.vercel.app" />
   <style>
     * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
+      font-family: "Pixelify Sans", serif;
+      font-optical-sizing: auto;
     }
 
     html {
-      background: yellow;
+      background: #000;
+      color: #fff;
     }
 
-    div {
+    main {
       display: flex;
       align-items: center;
       justify-content: center;
@@ -30,8 +36,8 @@
     canvas {
       width: 500px;
       max-width: 100vw;
-      margin: auto;
-      border: 8px solid #000;
+      margin: 0 auto;
+      border: 8px solid #222;
       transition: opacity 0.3s ease-in-out;
     }
 
@@ -44,14 +50,21 @@
       padding: 30px 10px;
     }
 
-
-    nav {
+    h1 {
       text-align: center;
     }
 
-    h1 {
-      font-family: helvetica;
+    nav {
       text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    #main-nav {
+      display: flex;
+      gap: 80px;
+      align-items: center;
     }
 
     button {
@@ -62,63 +75,99 @@
       width: 80px;
       font-weight: bold;
       vertical-align: middle;
-      line-height: 30px;
-      height: 30px;
-      border: none;
+      line-height: 40px;
+      height: 40px;
+      border: 1px solid #333;
+      cursor: pointer;
+    }
+
+    @media (hover: hover) {
+      button:hover {
+        border-color: #666;
+      }
     }
 
     button.active {
-      background: red;
+      background: #fff;
+      color: #000;
+    }
+
+    #buttons {
+      display: flex;
+      gap: 10px;
+    }
+
+    #buttons button {
+      height: 50px;
+      line-height: 50px;
+    }
+
+    #misc button {
+      height: 26px;
+      line-height: 26px;
+      font-size: 14px;
     }
   </style>
 </head>
 
 <body>
-  <div>
-    <h1>Pokeless: λ plays pokemon</h1>
+  <main>
+    <h1>Fluid plays pokemon</h1>
     <canvas width="320" height="288"></canvas>
     <nav>
-      <button value="4">A</button>
-      <button value="5">B</button>
-      <button value="2">↑</button>
-      <button value="7">START</button>
-      <button value="6">SEL</button>
-      <button value="1">←</button>
-      <button value="3">↓</button>
-      <button value="0">→</button>
+      <div id="main-nav">
+        <div id="dpad">
+          <div>
+            <button value="2">↑</button>
+          </div>
+          <button value="1">←</button>
+          <button value="3">↓</button>
+          <button value="0">→</button>
+        </div>
+
+        <div id="buttons">
+          <button value="4">A</button>
+          <button value="5">B</button>
+        </div>
+      </div>
+
+      <div id="misc">
+        <button value="7">START</button>
+        <button value="6">SEL</button>
+      </div>
     </nav>
-  </div>
+  </main>
 
   <script>
-    const canvas = document.querySelector('canvas');
-    const ctx = canvas.getContext('2d');
+    const canvas = document.querySelector("canvas");
+    const ctx = canvas.getContext("2d");
     let paused = false;
     let lastFrameTime = Date.now();
 
     // Key mapping
     const keyMap = {
-      'ArrowRight': '0',
-      'ArrowLeft': '1',
-      'ArrowUp': '2',
-      'ArrowDown': '3',
-      'a': '4',
-      'b': '5',
-      'Enter': '6',
-      ' ': '7',
-      'Right': '0',  // IE/Edge compatibility
-      'Left': '1',   // IE/Edge compatibility
-      'Up': '2',     // IE/Edge compatibility
-      'Down': '3'    // IE/Edge compatibility
+      ArrowRight: "0",
+      ArrowLeft: "1",
+      ArrowUp: "2",
+      ArrowDown: "3",
+      a: "4",
+      b: "5",
+      Enter: "6",
+      " ": "7",
+      Right: "0", // IE/Edge compatibility
+      Left: "1", // IE/Edge compatibility
+      Up: "2", // IE/Edge compatibility
+      Down: "3", // IE/Edge compatibility
     };
 
     // Handle key press
     function pressKey(key) {
       setActiveButton(key);
-      fetch('/api/key', {
-        method: 'POST',
-        body: key
-      }).catch(err => {
-        console.error('Error pressing key:', err);
+      fetch("/api/key", {
+        method: "POST",
+        body: key,
+      }).catch((err) => {
+        console.error("Error pressing key:", err);
       });
     }
 
@@ -130,14 +179,14 @@
     // Update active button UI
     function setActiveButton(key) {
       // Remove active class from all buttons
-      document.querySelectorAll('button.active').forEach(btn => {
-        btn.classList.remove('active');
+      document.querySelectorAll("button.active").forEach((btn) => {
+        btn.classList.remove("active");
       });
 
       // Add active class to pressed button
       if (key !== null) {
         const btn = document.querySelector(`button[value="${key}"]`);
-        if (btn) btn.classList.add('active');
+        if (btn) btn.classList.add("active");
       }
     }
 
@@ -150,17 +199,17 @@
 
       // Add reconnecting class before starting new stream
       if (Date.now() - lastFrameTime > 1000) {
-        canvas.classList.add('reconnecting');
+        canvas.classList.add("reconnecting");
       }
 
       try {
-        const response = await fetch('/api/run');
+        const response = await fetch("/api/run");
         const reader = response.body.getReader();
         let buffer = new Uint8Array();
 
         // Reset retry count and fade state on successful connection
         retryCount = 0;
-        canvas.classList.remove('reconnecting');
+        canvas.classList.remove("reconnecting");
 
         while (true) {
           const {value, done} = await reader.read();
@@ -176,126 +225,136 @@
           let frameStart = 0;
           while (true) {
             // Find start of PNG data
-            const pngStart = findSequence(buffer, [0x89, 0x50, 0x4E, 0x47], frameStart);
+            const pngStart = findSequence(
+              buffer,
+              [0x89, 0x50, 0x4e, 0x47],
+              frameStart,
+            );
             if (pngStart === -1) break;
 
             // Find end of PNG data (IEND chunk)
-            const pngEnd = findSequence(buffer, [0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82], pngStart);
+            const pngEnd = findSequence(
+              buffer,
+              [0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82],
+              pngStart,
+            );
             if (pngEnd === -1) break;
 
             // Extract PNG data
             const pngData = buffer.slice(pngStart, pngEnd + 8);
-            
+
             // Create and display image
-            const blob = new Blob([pngData], { type: 'image/png' });
+            const blob = new Blob([pngData], {type: "image/png"});
             const img = new Image();
             img.onload = () => {
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
               URL.revokeObjectURL(img.src);
               lastFrameTime = Date.now();
-              canvas.classList.remove('reconnecting');
+              canvas.classList.remove("reconnecting");
             };
             img.src = URL.createObjectURL(blob);
 
             // Move to next frame
             frameStart = pngEnd + 8;
 
-              // Move to next frame
-              frameStart = pngEnd + 8;
-            }
-
-            // Keep only unprocessed data
-            buffer = buffer.slice(frameStart);
+            // Move to next frame
+            frameStart = pngEnd + 8;
           }
 
-          // Stream completed normally, start a new one immediately
-          startStream();
-        } catch (err) {
-          console.error('Error streaming frames:', err);
-          // Exponential backoff with jitter
-          const delay = Math.min(Math.pow(2, retryCount) * 1000 + Math.random() * 1000, MAX_RETRY_DELAY);
-          retryCount++;
-          setTimeout(startStream, delay);
+          // Keep only unprocessed data
+          buffer = buffer.slice(frameStart);
         }
+
+        // Stream completed normally, start a new one immediately
+        startStream();
+      } catch (err) {
+        console.error("Error streaming frames:", err);
+        // Exponential backoff with jitter
+        const delay = Math.min(
+          Math.pow(2, retryCount) * 1000 + Math.random() * 1000,
+          MAX_RETRY_DELAY,
+        );
+        retryCount++;
+        setTimeout(startStream, delay);
       }
+    }
 
-
-      // Helper function to find byte sequence in buffer
-      function findSequence(buffer, sequence, start = 0) {
-        for (let i = start; i <= buffer.length - sequence.length; i++) {
-          let found = true;
-          for (let j = 0; j < sequence.length; j++) {
-            if (buffer[i + j] !== sequence[j]) {
-              found = false;
-              break;
-            }
+    // Helper function to find byte sequence in buffer
+    function findSequence(buffer, sequence, start = 0) {
+      for (let i = start; i <= buffer.length - sequence.length; i++) {
+        let found = true;
+        for (let j = 0; j < sequence.length; j++) {
+          if (buffer[i + j] !== sequence[j]) {
+            found = false;
+            break;
           }
-          if (found) return i;
         }
-        return -1;
+        if (found) return i;
       }
+      return -1;
+    }
 
-      // Key event handlers
-      window.addEventListener('keydown', (e) => {
-        if (e.repeat) return;
-        const key = keyMap[e.key];
-        if (key !== undefined) {
-          e.preventDefault();
-          pressKey(key);
-        }
-      });
+    // Key event handlers
+    window.addEventListener("keydown", (e) => {
+      if (e.repeat) return;
+      const key = keyMap[e.key];
+      if (key !== undefined) {
+        e.preventDefault();
+        pressKey(key);
+      }
+    });
 
-      window.addEventListener('keyup', (e) => {
-        const key = keyMap[e.key];
-        if (key !== undefined) {
-          e.preventDefault();
-          releaseKey();
-        }
-      });
+    window.addEventListener("keyup", (e) => {
+      const key = keyMap[e.key];
+      if (key !== undefined) {
+        e.preventDefault();
+        releaseKey();
+      }
+    });
 
-      // Button event handlers
-      document.addEventListener('mousedown', (e) => {
-        if (e.target.nodeName === 'BUTTON') {
-          e.preventDefault();
-          pressKey(e.target.value);
-        }
-      });
+    // Button event handlers
+    document.addEventListener("mousedown", (e) => {
+      if (e.target.nodeName === "BUTTON") {
+        e.preventDefault();
+        pressKey(e.target.value);
+      }
+    });
 
-      document.addEventListener('mouseup', (e) => {
-        if (e.target.nodeName === 'BUTTON') {
-          e.preventDefault();
-          releaseKey();
-        }
-      });
+    document.addEventListener("mouseup", (e) => {
+      if (e.target.nodeName === "BUTTON") {
+        e.preventDefault();
+        releaseKey();
+      }
+    });
 
-      // Touch event handlers
-      document.addEventListener('touchstart', (e) => {
-        if (e.target.nodeName === 'BUTTON') {
-          e.preventDefault();
-          pressKey(e.target.value);
-        }
-      });
+    // Touch event handlers
+    document.addEventListener("touchstart", (e) => {
+      if (e.target.nodeName === "BUTTON") {
+        e.preventDefault();
+        pressKey(e.target.value);
+      }
+    });
 
-      document.addEventListener('touchend', (e) => {
-        if (e.target.nodeName === 'BUTTON') {
-          e.preventDefault();
-          releaseKey();
-        }
-      });
+    document.addEventListener("touchend", (e) => {
+      if (e.target.nodeName === "BUTTON") {
+        e.preventDefault();
+        releaseKey();
+      }
+    });
 
-      // Visibility handling
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-          paused = true;
-          releaseKey();
-        } else {
-          paused = false;
-          startStream();
-        }
-      });
+    // Visibility handling
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        paused = true;
+        releaseKey();
+      } else {
+        paused = false;
+        startStream();
+      }
+    });
 
-      // Start the stream
-      startStream();
+    // Start the stream
+    startStream();
   </script>
 </body>
 

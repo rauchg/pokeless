@@ -11,13 +11,14 @@ export async function POST(req) {
   }
 
   try {
+    const isDev = process.env.NODE_ENV !== 'production';
     const geo = {
-      city: req.headers.get("x-vercel-ip-city"),
-      region: req.headers.get("x-vercel-ip-region"),
-      country: req.headers.get("x-vercel-ip-country")
+      city: isDev ? "San Francisco" : req.headers.get("x-vercel-ip-city"),
+      region: isDev ? "California" : req.headers.get("x-vercel-ip-region"),
+      country: isDev ? "US" : req.headers.get("x-vercel-ip-country")
     };
 
-    // Set the key with location info
+    // Set the key and location info
     await r.mset({
       "last_key": key.toString(),
       "last_key_geo": JSON.stringify(geo)

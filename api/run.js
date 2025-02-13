@@ -49,17 +49,41 @@ export async function GET(req) {
   }
 
   // Function to send a frame
-  async function sendFrame(frame, frameHash) {
+  async function sendFrame(frame, frameHash, keyInfo = null) {
     if (!frame) return;
-    console.log("sending frame", frame.length, "bytes", frameHash);
-    const multipartFrame = Buffer.concat([
-      Buffer.from("--frame\r\n"),
-      Buffer.from("Content-Type: image/png\r\n"),
-      Buffer.from("Content-Length: " + frame.length + "\r\n\r\n"),
-      frame,
-      Buffer.from("\r\n"),
-    ]);
-    await writer.write(multipartFrame);
+    console.log(
+      "sending frame",
+      frame.length,
+      "bytes",
+      frameHash,
+      keyInfo ? "with key" : "",
+    );
+
+    // Send PNG frame
+    await writer.write(
+      Buffer.concat([
+        Buffer.from("--frame\r\n"),
+        Buffer.from("Content-Type: image/png\r\n"),
+        Buffer.from("Content-Length: " + frame.length + "\r\n\r\n"),
+        frame,
+        Buffer.from("\r\n"),
+      ]),
+    );
+
+    // If there was a key press, send its info
+    if (keyInfo) {
+      const json = JSON.stringify({ keyInfo });
+      console.log("sending key info:", json);
+      await writer.write(
+        Buffer.concat([
+          Buffer.from("--frame\r\n"),
+          Buffer.from("Content-Type: application/json\r\n"),
+          Buffer.from("Content-Length: " + json.length + "\r\n\r\n"),
+          Buffer.from(json),
+          Buffer.from("\r\n"),
+        ]),
+      );
+    }
   }
 
   // Set up cleanup function
@@ -67,6 +91,8 @@ export async function GET(req) {
     console.log("cleaning up stream");
     sub.unsubscribe("frame").catch(console.error);
     writer.close().catch(console.error);
+    // Reset game loop flag so another instance can start
+    gameLoopStarted = false;
   };
 
   // Set up timeout
@@ -77,22 +103,25 @@ export async function GET(req) {
     // Try to use cached frame first
     let initialFrame = latestFrame;
     let initialHash = latestFrameHash;
-    
+
     if (!initialFrame || !initialHash) {
       initialFrame = await r.getBuffer("latest_image");
       initialHash = await r.get("latest_image_hash");
     }
 
     if (initialFrame && initialHash) {
-      console.log("sending initial frame", initialFrame === latestFrame ? "(from cache)" : "(from redis)");
-      waitUntil(sendFrame(initialFrame, initialHash));
+      console.log(
+        "sending initial frame",
+        initialFrame === latestFrame ? "(from cache)" : "(from redis)",
+      );
+      waitUntil(sendFrame(initialFrame, initialHash, null));
     }
 
     console.log("setting up subscription");
     sub.on("message", async (channel, message) => {
       try {
         const { hash: frameHash, keyInfo } = JSON.parse(message);
-        
+
         // If hash matches our cached version, use the cached frame
         if (frameHash === latestFrameHash && latestFrame) {
           console.log("using cached frame");
@@ -130,14 +159,19 @@ export async function GET(req) {
 async function runGameLoop() {
   const mutex = new Mutex(r, "run", { lockTimeout: MUTEX_TIMEOUT });
 
-  while (true) {
+  console.log("starting game loop");
+  let attemptCount = 0;
+  while (gameLoopStarted) {
     try {
+      const attemptTime = Date.now();
+      console.log(`[${attemptCount}] attempting to acquire lock...`);
       const acquired = await mutex.tryAcquire();
+      const acquireTime = Date.now();
+      const acquireDuration = acquireTime - attemptTime;
+      
       if (acquired) {
         console.log(
-          "acquired lock, running game loop for",
-          EMULATION_SESSION_TIME,
-          "ms",
+          `[${attemptCount}] acquired lock after ${acquireDuration}ms (will run for ${EMULATION_SESSION_TIME}ms)`
         );
         const sessionEndTime = Date.now() + EMULATION_SESSION_TIME;
 
@@ -145,8 +179,8 @@ async function runGameLoop() {
           // First run initializes the session
           await run(true);
 
-          // Then run continuously until session time is up
-          while (Date.now() < sessionEndTime) {
+          // Then run continuously until session time is up or game loop stops
+          while (Date.now() < sessionEndTime && gameLoopStarted) {
             await run(false);
             // Small delay between runs
             await new Promise((resolve) => setTimeout(resolve, 100));
@@ -154,15 +188,20 @@ async function runGameLoop() {
         } catch (err) {
           console.error("error running game loop:", err.stack);
         } finally {
+          console.log(`[${attemptCount}] releasing lock`);
           await mutex.release();
+          console.log(`[${attemptCount}] lock released, waiting 100ms before next attempt`);
           // After a full session, wait a bit before trying to acquire again
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
       } else {
+        console.log(`[${attemptCount}] failed to acquire lock, waiting 1s before retry`);
         // If we couldn't acquire the lock, wait longer since sessions are 5s
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
+      attemptCount++;
     } catch (err) {
+      console.log("game loop error:", err);
       console.error("error in game loop:", err.stack);
       // Wait a bit longer on error before retrying
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -177,18 +216,29 @@ async function run(isFirstRunInSession = false) {
     let gb;
     let canvas;
     let key = null;
+    let keyInfo = null;
+
+    // Check for key press at start
+    const [lastKey, lastKeyGeo, stateId] = await r.mget([
+      "last_key",
+      "last_key_geo",
+      "state_id",
+    ]);
+
+    if (lastKey) {
+      key = Number(lastKey);
+      if (lastKeyGeo) {
+        keyInfo = {
+          key: lastKey,
+          geo: JSON.parse(lastKeyGeo),
+        };
+      }
+      console.log("using key press:", key);
+      // Clear the key so it's not used again
+      await r.del("last_key");
+    }
 
     if (isFirstRunInSession) {
-      // Only check Redis state at the start of a session
-      const [lastKeyStr, stateId] = await r.mget(["last_key", "state_id"]);
-
-      if (lastKeyStr) {
-        key = Number(lastKeyStr);
-        console.log("using key press:", key);
-        // Clear the last key so it's not used again
-        await r.del("last_key");
-      }
-
       // Initialize emulator if needed
       if (!hotEmulator || hotEmulatorStateId !== stateId) {
         console.log("initializing new emulator, state_id:", stateId);
@@ -219,12 +269,7 @@ async function run(isFirstRunInSession = false) {
         console.log("reusing hot emulator with state_id:", stateId);
       }
     } else {
-      // During session, just check for new key press
-      const lastKeyStr = await r.getset("last_key", "-1");
-      if (lastKeyStr && lastKeyStr !== "-1") {
-        key = Number(lastKeyStr);
-        console.log("using key press during session:", key);
-      }
+      console.log("using hot emulator");
     }
 
     // Use hot emulator
@@ -278,25 +323,15 @@ async function run(isFirstRunInSession = false) {
         latest_image: buf,
         latest_image_hash: frameHash,
         latest_state: state2,
-        key: -1,
       });
       console.timeEnd("snap");
 
       // Update hot emulator state ID since we just saved a new state
       hotEmulatorStateId = newStateId.toString();
 
-      // Get key info if there was a key press
-      const [lastKey, lastKeyGeo] = await r.mget(["last_key", "last_key_geo"]);
-      console.log("key info from redis:", { lastKey, lastKeyGeo });
-      
-      const keyInfo = lastKey && lastKey !== "-1" ? {
-        key: lastKey,
-        geo: JSON.parse(lastKeyGeo || "{}")
-      } : null;
-
       const message = JSON.stringify({
         hash: frameHash,
-        keyInfo
+        keyInfo,
       });
       console.log("publishing frame message:", message);
       await r.publish("frame", message);
