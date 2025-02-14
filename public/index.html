@@ -45,13 +45,22 @@
       opacity: 0.5;
     }
 
-    h1,
-    nav {
-      padding: 30px 10px;
+    #key-info {
+      height: 20px;
+      font-size: 14px;
+      margin: 10px 0;
+      opacity: 0;
+      transition: opacity 0.2s ease-out;
+      text-align: center;
+    }
+
+    #key-info.visible {
+      opacity: 1;
     }
 
     h1 {
       text-align: center;
+      margin-bottom: 30px;
     }
 
     nav {
@@ -114,6 +123,7 @@
   <main>
     <h1>Fluid plays pokemon</h1>
     <canvas width="320" height="288"></canvas>
+    <div id="key-info"></div>
     <nav>
       <div id="main-nav">
         <div id="dpad">
@@ -141,8 +151,22 @@
   <script>
     const canvas = document.querySelector("canvas");
     const ctx = canvas.getContext("2d");
-    let paused = false;
+    const keyInfo = document.querySelector("#key-info");
     let lastFrameTime = Date.now();
+    let currentStream = null;
+    let keyInfoTimeout;
+
+    // Key name mapping
+    const keyNames = {
+      0: "→",
+      1: "←",
+      2: "↑",
+      3: "↓",
+      4: "A",
+      5: "B",
+      6: "SEL",
+      7: "START",
+    };
 
     // Key mapping
     const keyMap = {
@@ -195,7 +219,7 @@
     const MAX_RETRY_DELAY = 5000; // max 5 second delay
 
     async function startStream() {
-      if (paused) return;
+      if (document.hidden) return;
 
       // Add reconnecting class before starting new stream
       if (Date.now() - lastFrameTime > 1000) {
@@ -206,6 +230,9 @@
         const response = await fetch("/api/run");
         const reader = response.body.getReader();
         let buffer = new Uint8Array();
+
+        // Store current stream
+        currentStream = {reader, response};
 
         // Reset retry count and fade state on successful connection
         retryCount = 0;
@@ -254,28 +281,120 @@
             };
             img.src = URL.createObjectURL(blob);
 
-            // Move to next frame
+            // Move past PNG
             frameStart = pngEnd + 8;
 
-            // Move to next frame
-            frameStart = pngEnd + 8;
+            // Look for JSON frame
+            const jsonFrameStart = findSequence(
+              buffer,
+              [0x2d, 0x2d, 0x66, 0x72, 0x61, 0x6d, 0x65, 0x0d, 0x0a], // "--frame\r\n"
+              frameStart,
+            );
+
+            if (jsonFrameStart !== -1) {
+              // Find double CRLF that separates headers from content
+              const contentStart = findSequence(
+                buffer,
+                [0x0d, 0x0a, 0x0d, 0x0a], // "\r\n\r\n"
+                jsonFrameStart,
+              );
+
+              if (contentStart !== -1) {
+                // Find next frame boundary or end of data
+                const nextFrame = findSequence(
+                  buffer,
+                  [0x0d, 0x0a, 0x2d, 0x2d], // "\r\n--"
+                  contentStart + 4,
+                );
+
+                // Get headers to check content type
+                const headers = new TextDecoder().decode(
+                  buffer.slice(jsonFrameStart, contentStart),
+                );
+
+                if (headers.includes("Content-Type: application/json")) {
+                  // Extract JSON content
+                  const jsonEnd =
+                    nextFrame !== -1 ? nextFrame : buffer.length;
+                  const jsonContent = new TextDecoder().decode(
+                    buffer.slice(contentStart + 4, jsonEnd),
+                  );
+
+                  try {
+                    const data = JSON.parse(jsonContent);
+                    if (data.keyInfo) {
+                      const {key, geo} = data.keyInfo;
+                      if (geo && geo.city) {
+                        const location = [geo.city, geo.region]
+                          .filter(Boolean)
+                          .join(", ");
+                        const flag = geo.country
+                          ? String.fromCodePoint(
+                            ...geo.country
+                              .toUpperCase()
+                              .split("")
+                              .map((c) => c.charCodeAt(0) + 127397),
+                          )
+                          : "🌎";
+                        const text = `${keyNames[key]} from ${flag} ${location}`;
+
+                        // Update key info display
+                        keyInfo.textContent = text;
+                        keyInfo.classList.remove("visible");
+
+                        // Force reflow
+                        void keyInfo.offsetHeight;
+
+                        // Show with animation
+                        keyInfo.classList.add("visible");
+
+                        // Clear previous timeout
+                        clearTimeout(keyInfoTimeout);
+
+                        // Hide after delay
+                        keyInfoTimeout = setTimeout(() => {
+                          keyInfo.classList.remove("visible");
+                        }, 2000);
+                      }
+                    }
+                  } catch (e) {
+                    console.error("Error parsing JSON:", e);
+                  }
+                }
+
+                // Move to next frame or end
+                frameStart = nextFrame !== -1 ? nextFrame + 2 : buffer.length;
+              }
+            }
           }
 
           // Keep only unprocessed data
           buffer = buffer.slice(frameStart);
         }
 
-        // Stream completed normally, start a new one immediately
-        startStream();
+        // Clear current stream reference
+        currentStream = null;
+
+        // Only start a new stream if page is visible
+        if (!document.hidden) {
+          startStream();
+        }
       } catch (err) {
         console.error("Error streaming frames:", err);
-        // Exponential backoff with jitter
-        const delay = Math.min(
-          Math.pow(2, retryCount) * 1000 + Math.random() * 1000,
-          MAX_RETRY_DELAY,
-        );
-        retryCount++;
-        setTimeout(startStream, delay);
+
+        // Clear current stream reference
+        currentStream = null;
+
+        // Only retry if page is visible
+        if (!document.hidden) {
+          // Exponential backoff with jitter
+          const delay = Math.min(
+            Math.pow(2, retryCount) * 1000 + Math.random() * 1000,
+            MAX_RETRY_DELAY,
+          );
+          retryCount++;
+          setTimeout(startStream, delay);
+        }
       }
     }
 
@@ -345,11 +464,13 @@
     // Visibility handling
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
-        paused = true;
         releaseKey();
+        // Let current stream finish naturally
       } else {
-        paused = false;
-        startStream();
+        // Only start a new stream if we don't have one running
+        if (!currentStream) {
+          startStream();
+        }
       }
     });
 
