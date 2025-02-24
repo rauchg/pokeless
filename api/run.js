@@ -228,9 +228,14 @@ async function run(isFirstRunInSession = false) {
     if (lastKey) {
       key = Number(lastKey);
       if (lastKeyGeo) {
+        const geoData = JSON.parse(lastKeyGeo);
+        // Ensure geo values are properly escaped
+        if (geoData.city) geoData.city = decodeURIComponent(geoData.city);
+        if (geoData.region) geoData.region = decodeURIComponent(geoData.region);
+        if (geoData.country) geoData.country = decodeURIComponent(geoData.country);
         keyInfo = {
           key: lastKey,
-          geo: JSON.parse(lastKeyGeo),
+          geo: geoData,
         };
       }
       console.log("using key press:", key);

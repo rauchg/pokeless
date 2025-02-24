@@ -15,7 +15,7 @@
       margin: 0;
       padding: 0;
       box-sizing: border-box;
-      font-family: "Pixelify Sans", serif;
+      font-family: "Pixelify Sans";
       font-optical-sizing: auto;
     }
 
@@ -29,7 +29,7 @@
       align-items: center;
       justify-content: center;
       flex-direction: column;
-      height: 80vh;
+      height: 100vh;
       width: 100vw;
     }
 
@@ -72,7 +72,7 @@
 
     #main-nav {
       display: flex;
-      gap: 80px;
+      gap: 40px;
       align-items: center;
     }
 
@@ -103,18 +103,38 @@
 
     #buttons {
       display: flex;
-      gap: 10px;
-    }
-
-    #buttons button {
-      height: 50px;
-      line-height: 50px;
+      gap: 5px;
     }
 
     #misc button {
       height: 26px;
       line-height: 26px;
       font-size: 14px;
+    }
+
+    @media (max-width: 600px) {
+      button {
+        width: 60px;
+        height: 45px;
+        line-height: 45px;
+        font-size: 16px;
+      }
+
+      #buttons button {
+        height: 45px;
+        line-height: 45px;
+      }
+
+      #misc button {
+        height: 35px;
+        line-height: 35px;
+        padding: 0 15px;
+        width: auto;
+      }
+
+      #main-nav {
+        gap: 20px;
+      }
     }
   </style>
 </head>
@@ -184,15 +204,26 @@
       Down: "3", // IE/Edge compatibility
     };
 
+    let pendingKeyRequest = false;
+
     // Handle key press
-    function pressKey(key) {
+    async function pressKey(key) {
+      if (pendingKeyRequest) return;
+
+      pendingKeyRequest = true;
       setActiveButton(key);
-      fetch("/api/key", {
-        method: "POST",
-        body: key,
-      }).catch((err) => {
+
+      try {
+        await fetch("/api/key", {
+          method: "POST",
+          body: key,
+        });
+      } catch (err) {
         console.error("Error pressing key:", err);
-      });
+      } finally {
+        pendingKeyRequest = false;
+        setActiveButton(null);
+      }
     }
 
     // Handle key release
